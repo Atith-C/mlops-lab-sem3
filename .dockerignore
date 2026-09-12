@@ -1,0 +1,13 @@
+.git
+.gitignore
+.github
+__pycache__
+*.pyc
+.ipynb_checkpoints
+notebooks/
+data/
+mlruns/
+mlflow.db
+requirements.txt
+README.md
+.vscode
