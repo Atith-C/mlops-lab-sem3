@@ -27,6 +27,11 @@ jobs:
           pip install -r requirements-api.txt
           pip install pytest httpx ruff
 
+      - name: Download dataset
+        run: |
+          mkdir -p data/raw
+          curl -L -o data/raw/telco.csv https://raw.githubusercontent.com/IBM/telco-customer-churn-on-icp4d/master/data/Telco-Customer-Churn.csv
+
       - name: Lint with ruff
         run: ruff check src tests
 
