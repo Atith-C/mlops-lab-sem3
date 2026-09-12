@@ -7,6 +7,7 @@ pipeline handles encoding and scaling internally, so serving uses
 exactly the same transformations as training.
 """
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -18,22 +19,26 @@ from pydantic import BaseModel, Field
 MODEL_PATH = Path("models/model.pkl")
 THRESHOLD = 0.5
 
-app = FastAPI(
-    title="Telco Churn Prediction API",
-    description="Predicts customer churn from account and service features.",
-    version="1.0.0",
-)
-
 model = None
 
 
-@app.on_event("startup")
-def load_model():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     """Load the pipeline once at startup, not per request."""
     global model
     if not MODEL_PATH.exists():
         raise RuntimeError(f"Model not found at {MODEL_PATH}. Run train.py first.")
     model = joblib.load(MODEL_PATH)
+    yield
+    model = None
+
+
+app = FastAPI(
+    title="Telco Churn Prediction API",
+    description="Predicts customer churn from account and service features.",
+    version="1.0.0",
+    lifespan=lifespan,
+)
 
 
 class CustomerFeatures(BaseModel):

@@ -5,9 +5,9 @@ The saved artifact contains BOTH the preprocessor and the model, so serving
 code can pass raw feature dicts straight in without reimplementing encoding.
 """
 
-import joblib
 from pathlib import Path
 
+import joblib
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
@@ -18,7 +18,7 @@ from sklearn.metrics import (
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 
-from preprocess import load_data, build_preprocessor
+from preprocess import build_preprocessor, load_data
 
 RANDOM_STATE = 42
 TEST_SIZE = 0.2
