@@ -223,5 +223,14 @@ mlflow.db
 mlruns/
 
 # Project data and models
-data/*.csv
+data/**/*.csv
 models/*.pkl
+
+# Generated monitoring reports (rebuild with: python src/monitor_drift.py)
+monitoring/*.html
+
+# Claude Code
+.claude/
+.claude-flow/
+
+.vscode/

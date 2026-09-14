@@ -7,14 +7,31 @@ pipeline handles encoding and scaling internally, so serving uses
 exactly the same transformations as training.
 """
 
+import logging
+import sys
+import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
 import joblib
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel, Field
+
+# Log to stdout: in a container the runtime (Docker, Kubernetes) collects
+# stdout and ships it to the log backend. Files inside a container vanish
+# with it and are invisible to `docker logs`.
+logging.basicConfig(
+    level=logging.INFO,
+    stream=sys.stdout,
+    format="%(asctime)s %(levelname)s %(name)s | %(message)s",
+)
+log = logging.getLogger("churn_api")
 
 MODEL_PATH = Path("models/model.pkl")
 THRESHOLD = 0.5
@@ -26,11 +43,19 @@ model = None
 async def lifespan(app: FastAPI):
     """Load the pipeline once at startup, not per request."""
     global model
+    log.info("loading model from %s", MODEL_PATH)
     if not MODEL_PATH.exists():
+        log.critical("model file not found at %s", MODEL_PATH)
         raise RuntimeError(f"Model not found at {MODEL_PATH}. Run train.py first.")
-    model = joblib.load(MODEL_PATH)
+    try:
+        model = joblib.load(MODEL_PATH)
+    except Exception:
+        log.exception("failed to load model from %s", MODEL_PATH)
+        raise
+    log.info("model loaded (%s) path=%s", type(model).__name__, MODEL_PATH)
     yield
     model = None
+    log.info("model unloaded, shutting down")
 
 
 app = FastAPI(
@@ -39,6 +64,25 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# Middleware that times every request and counts it by route and status,
+# plus a GET /metrics endpoint that Prometheus scrapes. /metrics itself is
+# excluded so scrapes don't inflate the traffic numbers. Buckets start at
+# 5 ms because /predict typically completes in a few ms; the defaults
+# (0.1, 0.5, 1 s) would put every request in the first bucket.
+Instrumentator(excluded_handlers=["/metrics"]).instrument(
+    app, latency_lowr_buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.5, 1)
+).expose(app)
+
+
+@app.exception_handler(RequestValidationError)
+async def log_validation_error(request: Request, exc: RequestValidationError):
+    """Log rejected requests, then return FastAPI's standard 422 unchanged."""
+    errors = "; ".join(
+        f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors()
+    )
+    log.warning("rejected path=%s errors=[%s]", request.url.path, errors)
+    return await request_validation_exception_handler(request, exc)
 
 
 class CustomerFeatures(BaseModel):
@@ -119,13 +163,25 @@ def health():
 @app.post("/predict", response_model=PredictionResponse)
 def predict(features: CustomerFeatures):
     if model is None:
+        log.warning("predict refused: model not loaded")
         raise HTTPException(status_code=503, detail="Model not loaded")
 
+    request_id = uuid.uuid4().hex[:8]
+    start = time.perf_counter()
     row = pd.DataFrame([features.model_dump()])
     proba = float(model.predict_proba(row)[0, 1])
+    latency_ms = (time.perf_counter() - start) * 1000
+    prediction = proba >= THRESHOLD
+
+    log.info(
+        "predict id=%s tenure=%d contract=%s monthly_charges=%.2f "
+        "proba=%.4f pred=%s latency_ms=%.1f",
+        request_id, features.tenure, features.Contract, features.MonthlyCharges,
+        proba, prediction, latency_ms,
+    )
 
     return PredictionResponse(
         churn_probability=round(proba, 4),
-        churn_prediction=proba >= THRESHOLD,
+        churn_prediction=prediction,
         threshold=THRESHOLD,
     )

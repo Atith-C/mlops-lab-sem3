@@ -75,6 +75,34 @@ def test_negative_tenure_rejected(client):
     assert client.post("/predict", json=bad).status_code == 422
 
 
+def test_prediction_is_logged(client, caplog):
+    with caplog.at_level("INFO", logger="churn_api"):
+        client.post("/predict", json=VALID_CUSTOMER)
+    line = next(r.getMessage() for r in caplog.records if "predict id=" in r.getMessage())
+    assert "proba=" in line
+    assert "latency_ms=" in line
+
+
+def test_metrics_endpoint(client):
+    client.post("/predict", json=VALID_CUSTOMER)
+    r = client.get("/metrics")
+    assert r.status_code == 200
+    assert "http_requests_total" in r.text
+    assert "http_request_duration_seconds" in r.text
+    assert 'handler="/predict"' in r.text
+
+
+def test_metrics_counts_rejections(client):
+    client.post("/predict", json={**VALID_CUSTOMER, "Contract": "Monthly"})
+    r = client.get("/metrics")
+    assert any(
+        line.startswith("http_requests_total")
+        and 'handler="/predict"' in line
+        and 'status="4xx"' in line
+        for line in r.text.splitlines()
+    )
+
+
 def test_high_risk_scores_above_low_risk(client):
     """A new month-to-month customer should outrank a long-tenure two-year one."""
     low_risk = {
