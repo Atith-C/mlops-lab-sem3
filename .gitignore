@@ -229,6 +229,9 @@ models/*.pkl
 # Generated monitoring reports (rebuild with: python src/monitor_drift.py)
 monitoring/*.html
 
+# Partial files from an interrupted download (ingest.py) or model save (pipeline.py)
+*.part
+
 # Claude Code
 .claude/
 .claude-flow/

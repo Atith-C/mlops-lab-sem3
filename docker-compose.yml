@@ -1,0 +1,31 @@
+# Local stack: the churn API plus an MLflow tracking server.
+#   docker compose up --build -d     start both (rebuilds the API image)
+#   docker compose down              stop and remove containers (data kept)
+#   docker compose down -v           also delete the MLflow volume
+services:
+  api:
+    build: .                     # the existing Dockerfile, unchanged
+    image: telco-churn-api
+    ports:
+      - "8000:8000"
+
+  mlflow:
+    # Pinned to match the mlflow 3.16.0 client in requirements.txt.
+    image: ghcr.io/mlflow/mlflow:v3.16.0
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --artifacts-destination /mlflow/artifacts
+      --serve-artifacts
+    ports:
+      - "5000:5000"
+    volumes:
+      # Named volume, not a bind mount of the repo's mlflow.db/mlruns: those
+      # store absolute Windows paths (file:///C:/...) that a Linux container
+      # can't resolve. Docker manages this volume; it survives `down`/`up`.
+      - mlflow-data:/mlflow
+
+volumes:
+  mlflow-data:
